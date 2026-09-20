@@ -75,28 +75,39 @@ app.use((req, res, next) => {
 });
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = 'gemini-3.5-flash-lite';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const TRANSIENT_GEMINI_STATUSES = new Set([429, 500, 502, 503, 504]);
 
-const SYSTEM_PROMPT = `You are a senior freelance project consultant.
+const SYSTEM_PROMPT = `You are GigBrief, a senior freelance pre-sales and product discovery analyst.
 
-Task: Convert a vague client request into a compact, practical project brief for a freelancer.
+Task: Turn a vague client request into a practical decision brief. Help a freelancer understand what to build, define a realistic MVP, and choose a sensible first architecture before discussing price or delivery.
 
 Return ONLY valid JSON with exactly these keys:
 {
-  "summary": "1 sentence overview of the likely project",
-  "scope": "1 short paragraph explaining the likely project scope and deliverables",
-  "techSuggestions": ["brief suggestion 1", "brief suggestion 2", "brief suggestion 3"],
-  "redFlags": ["risk 1", "risk 2", "risk 3"],
-  "questionsToAsk": ["question 1", "question 2", "question 3"]
+  "projectTitle": "short descriptive name",
+  "oneLiner": "one sentence explaining the product and its primary user",
+  "problem": "the likely problem or outcome the client cares about",
+  "mvp": ["must-have capability 1", "must-have capability 2", "must-have capability 3"],
+  "userFlow": ["step 1", "step 2", "step 3", "step 4"],
+  "architecture": {
+    "recommendation": "the simplest appropriate architecture for this MVP",
+    "frontend": "framework and responsibility",
+    "backend": "framework and responsibility",
+    "data": "storage choice and the core entities or records",
+    "integrations": ["external service or integration, or state that none is required"]
+  },
+  "deliveryPlan": ["first milestone", "second milestone", "third milestone"],
+  "assumptions": ["important assumption 1", "important assumption 2", "important assumption 3"],
+  "questionsToAsk": ["specific client question 1", "specific client question 2", "specific client question 3"],
+  "outOfScope": ["feature to exclude from the first release", "another feature to defer"]
 }
 
 Rules:
-- Use only information reasonably implied by the client request.
-- Do not invent brand names, exact features, pricing, or unrealistic scope.
-- Keep each array item short, practical, and specific.
-- Use 3-5 items per array.
-- No markdown, no backticks, no extra text.
-- Output must be valid JSON only.`;
+- Use only information reasonably implied by the client request. Mark uncertainty as an assumption instead of inventing details.
+- Keep the MVP intentionally small and explainable. Recommend the simplest architecture that can validate the idea.
+- Do not invent brand names, exact pricing, user counts, or unrealistic requirements.
+- Use 3-5 concise items in each array. Keep architecture values brief and practical.
+- No markdown, no backticks, no extra text. Output must be valid JSON only.`;
 
 app.post('/api/generate', async (req, res) => {
   const startTime = Date.now();
@@ -122,26 +133,43 @@ app.post('/api/generate', async (req, res) => {
       model: MODEL,
     });
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+    const requestBody = {
+      contents: [
+        {
+          parts: [{ text: `${SYSTEM_PROMPT}\n\nClient request: "${clientInput}"` }],
         },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: `${SYSTEM_PROMPT}\n\nClient request: "${clientInput}"` }],
-            },
-          ],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.7,
-          },
-        }),
-      }
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.7,
+      },
+    };
+    const geminiUrl = new URL(
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`
     );
+    geminiUrl.searchParams.set('key', GEMINI_API_KEY);
+
+    let response;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.ok || !TRANSIENT_GEMINI_STATUSES.has(response.status) || attempt === 2) {
+        break;
+      }
+
+      const retryDelayMs = 1000 * (attempt + 1);
+      logger.warn('Transient Gemini response; retrying', {
+        status: response.status,
+        attempt: attempt + 1,
+        retryDelayMs,
+        route: '/api/generate',
+      });
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
 
     if (!response.ok) {
       const errText = await response.text();
