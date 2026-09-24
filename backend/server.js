@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json());
 
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const MAX_REQUESTS = 5;
+const MAX_REQUESTS = 3;
 const requestTracker = new Map();
 
 const getRateLimitMessage = (resetTime, now) => {
