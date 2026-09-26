@@ -9,6 +9,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get('/api/health', (req, res) => {
+  logger.info('Health check requested', { route: '/api/health' });
+  res.json({ status: 'ok' });
+});
+
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS = 3;
 const requestTracker = new Map();
@@ -219,11 +224,6 @@ app.post('/api/generate', async (req, res) => {
     });
     res.status(500).json({ error: 'Internal server error' });
   }
-});
-
-app.get('/api/health', (req, res) => {
-  logger.info('Health check requested', { route: '/api/health' });
-  res.json({ status: 'ok' });
 });
 
 const PORT = process.env.PORT || 5000;
