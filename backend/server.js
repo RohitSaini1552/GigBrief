@@ -80,7 +80,7 @@ app.use((req, res, next) => {
 });
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 const TRANSIENT_GEMINI_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 const SYSTEM_PROMPT = `You are GigBrief, a senior freelance pre-sales and product discovery analyst.
